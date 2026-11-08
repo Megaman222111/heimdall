@@ -1,0 +1,172 @@
+#pragma once
+// Dashboard served at "/". Self-contained (no internet needed on the phone).
+static const char DASHBOARD_HTML[] PROGMEM = R"HTML(<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Radar Vision Tracker</title>
+<style>
+:root{--bg:#0b0f14;--panel:#121820;--line:#243040;--txt:#d6e2ee;--dim:#7d8b99;--ok:#3ddc84;--cam:#ffc94a;--rad:#3ee6ff;--bad:#ff5c6c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.4 ui-monospace,Menlo,Consolas,monospace}
+header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
+header b{font-size:15px;letter-spacing:.04em}.pill{padding:2px 8px;border-radius:10px;border:1px solid var(--line);color:var(--dim)}
+.pill.on{color:var(--ok);border-color:var(--ok)}.pill.off{color:var(--bad);border-color:var(--bad)}
+main{display:grid;grid-template-columns:1.1fr 1fr;gap:12px;padding:12px 16px}
+@media(max-width:820px){main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px}
+.card h2{margin:0 0 8px;font-size:12px;color:var(--dim);font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.view{position:relative;width:100%;aspect-ratio:4/3;background:#05080b;border-radius:6px;overflow:hidden}
+.view img,.view canvas{position:absolute;inset:0;width:100%;height:100%}.view img{object-fit:fill}
+#fan{aspect-ratio:auto;height:auto}
+.ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+button{background:#1a2330;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
+button.act{border-color:var(--ok);color:var(--ok)}input[type=range]{flex:1;min-width:140px}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}td,th{padding:4px 6px;text-align:left;border-bottom:1px solid var(--line)}th{color:var(--dim);font-weight:500}
+.k{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--dim);font-size:12px;margin-top:6px}
+</style></head><body>
+<header><b>RADAR + VISION TRACKER</b>
+<span id="pRad" class="pill">radar</span><span id="pVis" class="pill">vision</span><span id="pNet" class="pill">link</span>
+<span>pan <span id="pan">0</span>&deg;</span><span>lock <span id="lock">-</span></span><span id="swp" class="pill" style="display:none">sweeping</span></header>
+<main>
+<section class="card"><h2>Camera</h2>
+<div class="view"><img id="cam" alt=""><canvas id="ov"></canvas></div>
+<div class="legend"><span><i class="k" style="background:var(--ok)"></i>radar + camera</span><span><i class="k" style="background:var(--cam)"></i>camera only</span><span><i class="k" style="background:var(--rad)"></i>radar only / behind obstacle</span></div>
+<div class="ctl"><button data-m="auto">Auto</button><button data-m="hold">Hold</button><button data-m="center">Center</button>
+<button id="sw">Sweep: on</button><input id="sl" type="range" min="-90" max="90" value="0" title="manual pan"></div>
+<div class="ctl" style="border-top:1px solid var(--line);padding-top:10px">
+<b style="font-size:12px;color:var(--dim);letter-spacing:.08em">CAR</b>
+<button id="cf">Follow: off</button><button id="cs" style="border-color:var(--bad);color:var(--bad)">STOP</button>
+<span id="cst" class="pill">off</span><span id="cal" class="pill">not lined up</span><span id="cth" style="color:var(--dim)"></span></div></section>
+<section class="card"><h2>Confidence radar</h2><canvas id="fan" class="view" style="aspect-ratio:1.45/1"></canvas>
+<table><thead><tr><th>ID</th><th>Source</th><th>Range</th><th>Bearing</th><th>Conf</th></tr></thead><tbody id="tb"></tbody></table></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const COL={both:'#3ddc84',cam:'#ffc94a',radar:'#3ee6ff'};
+const LBL={both:'radar + camera',cam:'camera only',radar:'radar only'};
+let S=null,frameSeq=-1,loading=false,fails=0;
+const cam=$('cam'),ov=$('ov'),fan=$('fan');
+const heat=document.createElement('canvas');heat.width=180;heat.height=124;const hx=heat.getContext('2d');
+// inferno-ish colormap
+const CMAP=(()=>{const s=[[0,0,0,0],[.25,40,11,84],[.5,147,38,103],[.75,229,92,48],[1,252,255,164]],o=[];
+for(let i=0;i<256;i++){const t=i/255;let k=0;while(k<s.length-2&&t>s[k+1][0])k++;const a=s[k],b=s[k+1],f=(t-a[0])/(b[0]-a[0]);
+o.push([a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f,a[3]+(b[3]-a[3])*f])}return o})();
+
+function fit(c){const r=c.getBoundingClientRect(),d=devicePixelRatio||1,w=Math.round(r.width*d),h=Math.round(r.height*d);
+if(c.width!==w||c.height!==h){c.width=w;c.height=h}return [w,h,d]}
+
+// Glowing person silhouette. (x, feetY) in px, h = total height px
+function person(g,x,feetY,h,col,alpha,label){
+  g.save();g.globalAlpha=alpha;g.shadowColor=col;g.shadowBlur=h*.25;g.fillStyle=col;
+  const hr=h*.13,bw=h*.34,bh=h*.66,top=feetY-h;
+  g.beginPath();g.arc(x,top+hr,hr,0,7);g.fill();
+  const bx=x-bw/2,by=top+hr*2+h*.04,r=bw/2;
+  g.beginPath();g.moveTo(bx,by+r);g.arc(x,by+r,r,Math.PI,0);g.lineTo(bx+bw,by+bh-r);g.arc(x,by+bh-r,r,0,Math.PI);g.closePath();g.fill();
+  g.shadowBlur=0;g.globalAlpha=1;
+  if(label){g.font=`${Math.round(Math.min(13,Math.max(10,h*.06))*(devicePixelRatio||1))}px ui-monospace,Menlo,Consolas,monospace`;g.textAlign='center';g.fillStyle='#fff';
+    g.fillText(label,x,feetY+16*(devicePixelRatio||1))}
+  g.restore();
+}
+
+function drawCam(){
+  const [W,H,d]=fit(ov),g=ov.getContext('2d');g.clearRect(0,0,W,H);
+  if(!S)return;
+  if(!cam.naturalWidth){g.fillStyle='#4a5866';g.font=`${13*d}px ui-monospace,Menlo,Consolas,monospace`;g.textAlign='center';
+    g.fillText(S.visionOk?'waiting for camera frame…':'camera offline',W/2,H/2)}
+  g.strokeStyle='rgba(255,255,255,.25)';g.lineWidth=d;g.beginPath();g.moveTo(W/2,H/2-12*d);g.lineTo(W/2,H/2+12*d);g.moveTo(W/2-12*d,H/2);g.lineTo(W/2+12*d,H/2);g.stroke();
+  const vf=S.vfov*Math.PI/180;
+  for(const t of S.tracks){
+    const col=COL[t.st],locked=t.id===S.lock;
+    if(t.box){
+      const [cx,cy,w,h]=t.box,x=(cx-w/2)*W,y=(cy-h/2)*H;
+      g.lineWidth=(locked?3:2)*d;g.strokeStyle=col;g.strokeRect(x,y,w*W,h*H);
+      g.fillStyle=col;g.font=`${12*d}px ui-monospace,Menlo,Consolas,monospace`;g.textAlign='left';
+      g.fillText(`#${t.id} ${(t.r/1000).toFixed(1)}m${t.est?'~':''}${locked?' ◎':''}`,x+3*d,Math.max(12*d,y-4*d));
+    }else if(t.st==='radar'){
+      const dist=(t.r/1000).toFixed(1)+' m';
+      if(t.inFov){
+        // place by bearing, size by distance (perspective)
+        const x=(0.5+t.brg/S.hfov)*W;
+        const hp=Math.min(1.15*H,Math.max(.14*H,H*1.7/(2*(t.r/1000)*Math.tan(vf/2))));
+        person(g,x,H/2+hp*.5,hp,col,.35+.5*t.conf,`#${t.id} ${dist} · not in camera`);
+      }else{
+        const right=t.brg>0,x=right?W-18*d:18*d,y=H/2;
+        g.fillStyle=col;g.beginPath();g.moveTo(x+(right?10:-10)*d,y);g.lineTo(x,y-9*d);g.lineTo(x,y+9*d);g.fill();
+        g.font=`${12*d}px ui-monospace,Menlo,Consolas,monospace`;g.textAlign=right?'right':'left';
+        g.fillText(`#${t.id} ${dist} ${Math.abs(t.brg).toFixed(0)}°`,x+(right?-6:6)*d,y-14*d);
+      }
+    }
+  }
+}
+
+function drawFan(){
+  const [W,H,d]=fit(fan),g=fan.getContext('2d');g.clearRect(0,0,W,H);
+  if(!S)return;
+  const maxR=S.maxR,ox=W/2,oy=H-14*d,R=Math.min(oy-10*d,(W/2-6*d)/Math.sin(Math.PI/3));
+  const toPx=(x,y)=>[ox+x/maxR*R,oy-y/maxR*R];
+  // heat layer: decay + splat
+  hx.globalCompositeOperation='destination-out';hx.fillStyle='rgba(0,0,0,.18)';hx.fillRect(0,0,heat.width,heat.height);
+  hx.globalCompositeOperation='lighter';
+  const hs=heat.width/W,splat=(x,y,w,rad)=>{const [px,py]=toPx(x,y),gx=px*hs,gy=py*hs,gr=hx.createRadialGradient(gx,gy,0,gx,gy,rad);
+    gr.addColorStop(0,`rgba(255,255,255,${w})`);gr.addColorStop(1,'rgba(255,255,255,0)');hx.fillStyle=gr;hx.beginPath();hx.arc(gx,gy,rad,0,7);hx.fill()};
+  for(const p of S.raw)splat(p[0],p[1],.12,9);
+  for(const t of S.tracks)splat(t.x,t.y,.1+.25*t.conf,t.est?15:11);
+  const img=hx.getImageData(0,0,heat.width,heat.height),px=img.data;
+  for(let i=0;i<px.length;i+=4){const a=px[i+3];if(!a)continue;const c=CMAP[a];px[i]=c[0];px[i+1]=c[1];px[i+2]=c[2];px[i+3]=Math.min(255,a*2.2)}
+  const tmp=document.createElement('canvas');tmp.width=heat.width;tmp.height=heat.height;tmp.getContext('2d').putImageData(img,0,0);
+  g.save();g.beginPath();g.moveTo(ox,oy);g.arc(ox,oy,R,-Math.PI/2-Math.PI/3,-Math.PI/2+Math.PI/3);g.closePath();
+  g.fillStyle='#071019';g.fill();g.clip();g.imageSmoothingEnabled=true;g.drawImage(tmp,0,0,W,H);g.restore();
+  // camera FOV wedge
+  const hf=S.hfov/2*Math.PI/180;g.fillStyle='rgba(255,201,74,.06)';g.beginPath();g.moveTo(ox,oy);g.arc(ox,oy,R,-Math.PI/2-hf,-Math.PI/2+hf);g.closePath();g.fill();
+  // grid
+  g.strokeStyle='rgba(120,200,230,.45)';g.lineWidth=d;g.fillStyle='rgba(160,210,230,.8)';g.font=`${11*d}px ui-monospace,Menlo,Consolas,monospace`;
+  for(let m=1;m<=maxR/1000;m++){const r=m*1000/maxR*R;g.beginPath();g.arc(ox,oy,r,-Math.PI/2-Math.PI/3,-Math.PI/2+Math.PI/3);g.stroke();g.textAlign='left';g.fillText(m+'m',ox+4*d,oy-r+12*d)}
+  for(const a of[-60,-30,0,30,60]){const t=a*Math.PI/180;g.beginPath();g.moveTo(ox,oy);g.lineTo(ox+R*Math.sin(t),oy-R*Math.cos(t));g.stroke();
+    if(a){g.textAlign='center';g.fillText((a>0?'+':'')+a+'°',ox+(R+0)*Math.sin(t)*.97,oy-R*Math.cos(t)*.97-6*d)}}
+  // markers
+  for(const t of S.tracks){
+    const [x,y]=toPx(t.x,t.y),col=COL[t.st],locked=t.id===S.lock;
+    if(t.st==='radar'){
+      const h=Math.max(20*d,Math.min(64*d,56*d*1500/Math.max(t.r,300)));  // closer = bigger
+      person(g,x,y+h*.5,h,col,.45+.5*t.conf,`#${t.id} ${(t.r/1000).toFixed(1)}m`);
+    }else{
+      g.fillStyle=col;g.beginPath();g.arc(x,y,6*d,0,7);g.fill();
+      if(t.est){g.setLineDash([4*d,4*d]);g.strokeStyle=col;g.beginPath();g.arc(x,y,12*d,0,7);g.stroke();g.setLineDash([])}
+      g.fillStyle='#fff';g.textAlign='left';g.fillText(`#${t.id}`,x+9*d,y-6*d);
+    }
+    if(locked){g.strokeStyle='#fff';g.lineWidth=1.5*d;g.beginPath();g.arc(x,y,16*d,0,7);g.stroke()}
+  }
+  g.fillStyle='#fff';g.beginPath();g.moveTo(ox,oy-8*d);g.lineTo(ox-6*d,oy+4*d);g.lineTo(ox+6*d,oy+4*d);g.fill();
+}
+
+function ui(){
+  $('pRad').className='pill '+(S.radarOk?'on':'off');$('pVis').className='pill '+(S.visionOk?'on':'off');
+  $('pNet').className='pill '+(fails?'off':'on');
+  $('pan').textContent=S.pan.toFixed(0);$('lock').textContent=S.lock>0?'#'+S.lock:'-';
+  document.querySelectorAll('button[data-m]').forEach(b=>b.classList.toggle('act',b.dataset.m===S.mode||(S.mode==='manual'&&b.dataset.m==='center'&&Math.abs(S.pan)<1)));
+  if(document.activeElement!==$('sl'))$('sl').value=S.pan;
+  $('sl').min=S.panMin;$('sl').max=S.panMax;
+  $('sw').textContent='Sweep: '+(S.sweepOn?'on':'off');$('sw').classList.toggle('act',S.sweepOn);
+  $('swp').style.display=S.sweeping?'':'none';$('swp').className='pill on';
+  if(S.car){const c=S.car;$('cf').textContent='Follow: '+(c.on?'on':'off');$('cf').classList.toggle('act',c.on);
+    $('cst').textContent=c.st;$('cst').className='pill'+(c.on&&c.st!=='idle'?' on':'');
+    $('cal').textContent=c.aligned?'straight shot':'not lined up';$('cal').className='pill'+(c.aligned?' on':'');
+    $('cth').textContent=c.on?`thr ${c.thr} · steer ${['L','-','R'][c.steer+1]} · stop at ${(c.standoff/1000).toFixed(1)} m`:''}
+  $('tb').innerHTML=S.tracks.map(t=>`<tr><td>#${t.id}${t.id===S.lock?' ◎':''}</td><td><i class="k" style="background:${COL[t.st]}"></i>${LBL[t.st]}${t.st==='radar'&&t.inFov?' (occluded?)':''}</td><td>${(t.r/1000).toFixed(2)} m${t.est?' ~':''}</td><td>${t.brg>0?'+':''}${t.brg.toFixed(0)}°</td><td>${(t.conf*100)|0}%</td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--dim)">no targets</td></tr>';
+}
+
+async function poll(){
+  try{const r=await fetch('state',{cache:'no-store'});S=await r.json();fails=0;
+    if(S.frame!==frameSeq&&!loading){loading=true;frameSeq=S.frame;cam.src='frame.jpg?s='+S.frame}
+    ui();
+  }catch(e){fails++;if(S)ui()}
+  setTimeout(poll,100);
+}
+cam.onload=cam.onerror=()=>{loading=false};
+document.querySelectorAll('button[data-m]').forEach(b=>b.onclick=()=>fetch('cmd?mode='+b.dataset.m));
+$('cf').onclick=()=>fetch('cmd?car='+(S&&S.car&&S.car.on?'off':'on'));
+$('sw').onclick=()=>fetch('cmd?sweep='+(S&&S.sweepOn?'off':'on'));
+$('cs').onclick=()=>fetch('cmd?car=stop');
+$('sl').oninput=e=>fetch('cmd?mode=manual&pan='+e.target.value);
+(function loop(){drawCam();drawFan();requestAnimationFrame(loop)})();
+poll();
+</script></body></html>)HTML";
