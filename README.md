@@ -62,6 +62,17 @@ Logs: `journalctl -u radar-tracker -f`.
 Dashboard buttons: **Auto** (tracks people), **Hold** (freezes the servo),
 **Center**, **Sweep**, and a manual slider.
 
+## Nerf gun
+
+An Arduino Uno on USB receives `fire` plus a newline at 115200 baud (`GUN_BAUD`,
+`GUN_COMMAND`). With `AUTO_FIRE_ON_START = True` the gun is live as soon as the
+Pi powers on; use **Disarm** on the dashboard, or set it to `False`.
+
+It fires only in Auto mode, at a camera-confirmed person within 3° of centre,
+held across 2 camera frames with the head steady, at most once every 4 s. The
+Uno takes about 3.4 s to spin up before each dart launches.
+Radar-only targets never fire. Mount the barrel level at chest height or lower.
+
 ## How the tracking works
 
 - **Matching:** a camera box and a radar target within 8° of each other are

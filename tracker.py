@@ -60,8 +60,15 @@ class VisionFrame:
 
 
 class Tracker:
-    def __init__(self, servo):
+    def __init__(self, servo, gun=None):
         self.servo = servo
+        self.gun = gun
+        self.armed = C.AUTO_FIRE_ON_START
+        self.shots = 0
+        self.last_fire_ms = -C.FIRE_COOLDOWN_MS
+        self.centered_since = 0
+        self.centered_frames = 0
+        self.last_centered_frame_ms = 0
         self.lock = threading.RLock()
         self.pan = 0.0
         self.tracks: List[Track] = []
@@ -261,6 +268,33 @@ class Tracker:
         self.pan = p
         self.servo.write(self.pan)
 
+    # ------------------------- firing -------------------------
+    def _on_target(self, now):
+        """True only for a camera-confirmed person, centred, with the head steady."""
+        t = next((t for t in self.tracks if t.id == self.locked_id), None)
+        return bool(t and (self.source(t, now) & SRC_CAM) and t.box
+                    and t.box[4] >= C.FIRE_MIN_SCORE
+                    and abs(t.cam_world - self.pan) <= C.FIRE_CENTER_DEG
+                    and abs(self.vision.pan - self.pan) <= C.FIRE_STILL_DEG)
+
+    def _shoot(self, now):
+        if now - self.last_fire_ms >= C.FIRE_COOLDOWN_MS and self.gun and self.gun.fire():
+            self.last_fire_ms = now
+            self.shots += 1
+            print(f"[gun] FIRE, shot {self.shots}", flush=True)
+
+    def update_gun(self, now):
+        if not (self.armed and self.mode == "auto" and self._on_target(now)):
+            self.centered_since = self.centered_frames = 0
+            return
+        if not self.centered_since:
+            self.centered_since = now
+        if self.vision.ms != self.last_centered_frame_ms:
+            self.last_centered_frame_ms = self.vision.ms
+            self.centered_frames += 1
+        if now - self.centered_since >= C.FIRE_SETTLE_MS and self.centered_frames >= C.FIRE_CENTER_FRAMES:
+            self._shoot(now)
+
     def run_forever(self):
         last = now_ms()
         next_log = last + 1000
@@ -274,6 +308,7 @@ class Tracker:
             with self.lock:
                 self.fuse(now)
                 self.control(now, dt)
+                self.update_gun(now)
                 if now >= next_log:
                     next_log = now + 1000
                     s = self.state()
@@ -308,15 +343,23 @@ class Tracker:
             return {
                 "t": now, "pan": round(self.pan, 1), "mode": self.mode, "lock": self.locked_id,
                 "radarOk": radar_ok, "visionOk": bool(self.vision_ok_ms) and now - self.vision_ok_ms < 1500,
-                "servoOk": self.servo.ok, "frame": self.jpeg_seq, "fw": C.CAM_WIDTH, "fh": C.CAM_HEIGHT,
+                "servoOk": self.servo.ok, "armed": self.armed,
+                "gunOk": bool(self.gun and self.gun.ok), "shots": self.shots,
+                "frame": self.jpeg_seq, "fw": C.CAM_WIDTH, "fh": C.CAM_HEIGHT,
                 "hfov": C.CAM_HFOV_DEG, "vfov": C.CAM_VFOV_DEG, "maxR": C.RADAR_MAX_RANGE_MM,
                 "sweepOn": self.sweep_on, "sweeping": self.sweeping,
                 "panMin": C.PAN_MIN_DEG, "panMax": C.PAN_MAX_DEG, "tracks": tracks,
                 "raw": [[C.RADAR_X_SIGN * x, y] for x, y, _ in self.radar_targets] if radar_ok else [],
             }
 
-    def command(self, mode, pan, sweep):
+    def command(self, mode, pan, sweep, arm=None, fire=None):
         with self.lock:
+            if arm in ("on", "off"):
+                self.armed = arm == "on"
+                if not self.armed and self.gun:
+                    self.gun.cancel()
+            if fire and self.armed:  # manual test shot; only when armed
+                self._shoot(now_ms())
             if mode in ("auto", "hold"):
                 self.mode = mode
             elif mode == "center":

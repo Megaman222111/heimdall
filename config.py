@@ -43,9 +43,9 @@ SERVO_MAX_US = 2500
 SERVO_CENTER_DEG = 90         # servo angle where the head points straight ahead
 PAN_MIN_DEG = -90             # narrow these if the servo buzzes at its end stops
 PAN_MAX_DEG = 90
-SERVO_INVERT = False          # True if a positive command turns the head the wrong way
+SERVO_INVERT = True           # True if a positive command turns the head the wrong way
 PAN_GAIN = 0.35               # fraction of error corrected per 50 Hz tick
-PAN_MAX_DEG_S = 60.0
+PAN_MAX_DEG_S = 180.0
 PAN_DEADBAND_DEG = 2.0
 FOLLOW_RADAR_ONLY = True      # turn toward radar-only targets when the camera sees nobody
 IDLE_RETURN_MS = 8000         # with sweep off: return to centre after this long (0 = hold)
@@ -54,3 +54,15 @@ IDLE_RETURN_MS = 8000         # with sweep off: return to centre after this long
 SWEEP_ENABLED = True
 SWEEP_START_MS = 1500
 SWEEP_DEG_S = 25.0
+
+# ---------------- Nerf gun (Arduino Uno over USB) ----------------
+AUTO_FIRE_ON_START = True     # armed as soon as the app starts; the dashboard can still disarm
+GUN_BAUD = 115200
+GUN_COMMAND = b"fire\n"
+GUN_RESET_WAIT_S = 2.5        # the Uno restarts whenever its port is opened
+FIRE_CENTER_DEG = 3.0         # person must be this close to dead centre
+FIRE_STILL_DEG = 3.0          # head must have been steady during the camera frame
+FIRE_MIN_SCORE = 0.60         # minimum camera confidence that it's a person
+FIRE_SETTLE_MS = 150          # must stay centred this long before firing
+FIRE_CENTER_FRAMES = 2        # ...and across this many separate camera frames
+FIRE_COOLDOWN_MS = 4000       # the Uno takes ~3.4 s to spin up and fire

@@ -65,17 +65,21 @@ def _open_camera():
     from picamera2 import Picamera2
 
     cam = Picamera2()
-    # Choose the fastest sensor mode that still uses the whole sensor, so the
-    # real field of view matches CAM_HFOV_DEG (OV5647's 640x480 mode is cropped).
-    widest = max(m["crop_limit"][2] * m["crop_limit"][3] for m in cam.sensor_modes)
-    full = [m for m in cam.sensor_modes if m["crop_limit"][2] * m["crop_limit"][3] == widest]
-    mode = max(full, key=lambda m: m["fps"])
-    cam.configure(cam.create_video_configuration(
-        main={"size": (C.CAM_WIDTH, C.CAM_HEIGHT), "format": "RGB888"},
-        raw={"size": mode["size"], "format": mode["unpacked"]},
-        transform=Transform(hflip=C.CAM_HFLIP, vflip=C.CAM_VFLIP),
-    ))
-    cam.start()
+    try:
+        # Choose the fastest sensor mode that still uses the whole sensor, so the
+        # real field of view matches CAM_HFOV_DEG (OV5647's 640x480 mode is cropped).
+        area = lambda m: m["crop_limits"][2] * m["crop_limits"][3]
+        widest = max(area(m) for m in cam.sensor_modes)
+        mode = max((m for m in cam.sensor_modes if area(m) == widest), key=lambda m: m["fps"])
+        cam.configure(cam.create_video_configuration(
+            main={"size": (C.CAM_WIDTH, C.CAM_HEIGHT), "format": "RGB888"},
+            raw={"size": mode["size"], "format": mode["unpacked"]},
+            transform=Transform(hflip=C.CAM_HFLIP, vflip=C.CAM_VFLIP),
+        ))
+        cam.start()
+    except Exception:
+        cam.close()  # otherwise the camera stays locked and every retry fails
+        raise
     print(f"[vision] camera started, sensor mode {mode['size']}", flush=True)
     return cam
 

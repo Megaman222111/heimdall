@@ -7,6 +7,10 @@ set -e
 NAME=RadarTracker
 PASS=tracker123
 
+# On the hotspot only: every hostname resolves to the Pi, so phones find the sign-in page.
+mkdir -p /etc/NetworkManager/dnsmasq-shared.d
+echo "address=/#/192.168.4.1" > /etc/NetworkManager/dnsmasq-shared.d/captive.conf
+
 nmcli connection delete "$NAME" 2>/dev/null || true
 nmcli connection add type wifi ifname wlan0 con-name "$NAME" ssid "$NAME" autoconnect yes \
   connection.autoconnect-priority 100 \
