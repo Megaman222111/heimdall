@@ -1,4 +1,6 @@
 # Heimdall: Radar + Vision Pan Tracker (Raspberry Pi 4)
+#By LaPeace
+#Group Members: Megh Mistry, Eli Cuala, Antonio Avendano, Amay Kumar, Spandan Gautam, Daniel Phan
 
 Heimdall is an automated radar sentry that watches a fence line day or night, at a fraction of the cost of commercial perimeter radar. This repository holds its tracking system.
 
