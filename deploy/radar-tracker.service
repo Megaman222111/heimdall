@@ -1,0 +1,14 @@
+[Unit]
+Description=Radar + vision pan tracker
+After=network.target
+
+[Service]
+User=meghmistry
+WorkingDirectory=/home/meghmistry/nathacks-2026
+ExecStart=/home/meghmistry/nathacks-2026/.venv/bin/python app.py
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

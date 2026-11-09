@@ -1,6 +1,4 @@
-#pragma once
-// Dashboard served at "/". Self-contained (no internet needed on the phone).
-static const char DASHBOARD_HTML[] PROGMEM = R"HTML(<!doctype html>
+<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Radar Vision Tracker</title>
 <style>
@@ -32,10 +30,7 @@ table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}td,th{pa
 <div class="legend"><span><i class="k" style="background:var(--ok)"></i>radar + camera</span><span><i class="k" style="background:var(--cam)"></i>camera only</span><span><i class="k" style="background:var(--rad)"></i>radar only / behind obstacle</span></div>
 <div class="ctl"><button data-m="auto">Auto</button><button data-m="hold">Hold</button><button data-m="center">Center</button>
 <button id="sw">Sweep: on</button><input id="sl" type="range" min="-90" max="90" value="0" title="manual pan"></div>
-<div class="ctl" style="border-top:1px solid var(--line);padding-top:10px">
-<b style="font-size:12px;color:var(--dim);letter-spacing:.08em">CAR</b>
-<button id="cf">Follow: off</button><button id="cs" style="border-color:var(--bad);color:var(--bad)">STOP</button>
-<span id="cst" class="pill">off</span><span id="cal" class="pill">not lined up</span><span id="cth" style="color:var(--dim)"></span></div></section>
+</section>
 <section class="card"><h2>Confidence radar</h2><canvas id="fan" class="view" style="aspect-ratio:1.45/1"></canvas>
 <table><thead><tr><th>ID</th><th>Source</th><th>Range</th><th>Bearing</th><th>Conf</th></tr></thead><tbody id="tb"></tbody></table></section>
 </main>
@@ -147,10 +142,6 @@ function ui(){
   $('sl').min=S.panMin;$('sl').max=S.panMax;
   $('sw').textContent='Sweep: '+(S.sweepOn?'on':'off');$('sw').classList.toggle('act',S.sweepOn);
   $('swp').style.display=S.sweeping?'':'none';$('swp').className='pill on';
-  if(S.car){const c=S.car;$('cf').textContent='Follow: '+(c.on?'on':'off');$('cf').classList.toggle('act',c.on);
-    $('cst').textContent=c.st;$('cst').className='pill'+(c.on&&c.st!=='idle'?' on':'');
-    $('cal').textContent=c.aligned?'straight shot':'not lined up';$('cal').className='pill'+(c.aligned?' on':'');
-    $('cth').textContent=c.on?`thr ${c.thr} · steer ${['L','-','R'][c.steer+1]} · stop at ${(c.standoff/1000).toFixed(1)} m`:''}
   $('tb').innerHTML=S.tracks.map(t=>`<tr><td>#${t.id}${t.id===S.lock?' ◎':''}</td><td><i class="k" style="background:${COL[t.st]}"></i>${LBL[t.st]}${t.st==='radar'&&t.inFov?' (occluded?)':''}</td><td>${(t.r/1000).toFixed(2)} m${t.est?' ~':''}</td><td>${t.brg>0?'+':''}${t.brg.toFixed(0)}°</td><td>${(t.conf*100)|0}%</td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--dim)">no targets</td></tr>';
 }
 
@@ -163,10 +154,8 @@ async function poll(){
 }
 cam.onload=cam.onerror=()=>{loading=false};
 document.querySelectorAll('button[data-m]').forEach(b=>b.onclick=()=>fetch('cmd?mode='+b.dataset.m));
-$('cf').onclick=()=>fetch('cmd?car='+(S&&S.car&&S.car.on?'off':'on'));
 $('sw').onclick=()=>fetch('cmd?sweep='+(S&&S.sweepOn?'off':'on'));
-$('cs').onclick=()=>fetch('cmd?car=stop');
 $('sl').oninput=e=>fetch('cmd?mode=manual&pan='+e.target.value);
 (function loop(){drawCam();drawFan();requestAnimationFrame(loop)})();
 poll();
-</script></body></html>)HTML";
+</script></body></html>
