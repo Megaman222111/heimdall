@@ -66,6 +66,6 @@ class Gun(threading.Thread):
                         self._read(ser)
             except Exception as e:  # includes termios.error when the Uno vanishes mid-open
                 print(f"[gun] disconnected ({e}); retrying", flush=True)
-            self.ser = None
+            self.ser = None #self.ser is now none
             self.want_fire.clear()  # never fire a stale shot after reconnecting
             time.sleep(1)
